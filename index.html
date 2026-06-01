@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>作業完了報告書 記入ツール</title>
+<style>
+  :root { --accent:#1769aa; }
+  * { box-sizing: border-box; }
+  html,body { margin:0; padding:0; font-family:-apple-system,"Hiragino Kaku Gothic ProN",sans-serif; color:#1b1b1b; background:#eef1f4; }
+  #app { display:flex; min-height:100vh; }
+
+  /* 左：操作パネル */
+  #panel { width:340px; flex:0 0 340px; background:#fff; border-right:1px solid #d7dde3; padding:16px; overflow-y:auto; height:100vh; position:sticky; top:0; }
+  #panel h1 { font-size:16px; margin:0 0 4px; }
+  #panel .sub { font-size:11px; color:#6b7682; margin:0 0 14px; line-height:1.5; }
+  .group { margin-bottom:14px; }
+  .group > label { display:block; font-size:12px; font-weight:600; margin-bottom:4px; color:#34404a; }
+  .group input[type=text], .group input[type=datetime-local], .group textarea {
+    width:100%; padding:7px 8px; font-size:13px; border:1px solid #c4ccd4; border-radius:6px; font-family:inherit; }
+  .group textarea { resize:vertical; min-height:64px; line-height:1.4; }
+  .row2 { display:flex; gap:8px; }
+  .row2 > div { flex:1; }
+  .radios { display:flex; gap:14px; align-items:center; font-size:13px; }
+  .btn { display:inline-block; width:100%; padding:10px; font-size:14px; font-weight:600; border:none; border-radius:8px; cursor:pointer; }
+  .btn.primary { background:var(--accent); color:#fff; }
+  .btn.primary:hover { background:#11537f; }
+  .btn.ghost { background:#eef1f4; color:#34404a; border:1px solid #c4ccd4; }
+  .btn.ghost:hover { background:#e3e8ed; }
+  .btnrow { display:flex; gap:8px; margin-top:6px; }
+  .toggle { display:flex; align-items:center; gap:8px; font-size:13px; background:#fff7e6; border:1px solid #f0d79a; padding:8px 10px; border-radius:8px; }
+  .hint { font-size:11px; color:#8a949d; line-height:1.5; margin-top:8px; }
+  #fileLabel { display:block; padding:10px; border:2px dashed #b7c2cc; border-radius:8px; text-align:center; font-size:13px; color:#5a6670; cursor:pointer; }
+  #fileLabel:hover { border-color:var(--accent); color:var(--accent); }
+  #fileInput { display:none; }
+  #status { font-size:11px; color:#6b7682; margin-top:6px; min-height:14px; }
+  .selinfo { font-size:11px; color:var(--accent); margin-top:6px; min-height:14px; }
+
+  /* 右：用紙ステージ */
+  #stage { flex:1; padding:24px; overflow:auto; display:flex; justify-content:center; align-items:flex-start; }
+  #page { position:relative; width:210mm; background:#fff; box-shadow:0 2px 16px rgba(0,0,0,.18); }
+  #pdfCanvas { display:block; width:100%; height:auto; }
+  #emptyMsg { padding:120px 20px; text-align:center; color:#9aa4ad; font-size:14px; }
+
+  .overlay { position:absolute; transform:translate(0,0); white-space:pre-wrap; line-height:1.3;
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN",sans-serif; color:#16324a; }
+  .overlay.text  { font-size:14px; }
+  .overlay.token { font-size:13px; text-align:center; min-width:14px; }
+  .overlay.multi { font-size:12px; overflow:hidden; }
+  .overlay.marker { width:46px; height:26px; border:2.2px solid #c0392b; border-radius:50%; }
+
+  /* 調整モード */
+  body.adjust .overlay { outline:1px dashed rgba(23,105,170,.7); background:rgba(23,105,170,.06); cursor:move; }
+  body.adjust .overlay.selected { outline:2px solid var(--accent); background:rgba(23,105,170,.14); }
+  .ovlabel { position:absolute; top:-14px; left:0; font-size:9px; color:var(--accent); background:#fff; padding:0 2px; white-space:nowrap; display:none; }
+  body.adjust .ovlabel { display:block; }
+
+  /* 印刷 */
+  @media print {
+    @page { size: A4 portrait; margin:0; }
+    body * { visibility:hidden; }
+    #page, #page * { visibility:visible; }
+    #panel, #stage { padding:0; }
+    #stage { display:block; overflow:visible; }
+    #page { position:absolute; left:0; top:0; width:210mm; box-shadow:none; }
+    .overlay { outline:none !important; background:transparent !important; }
+    .ovlabel { display:none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ============ 操作パネル ============ -->
+  <div id="panel" class="no-print">
+    <h1>作業完了報告書 記入ツール</h1>
+    <p class="sub">雛形PDFをアップロードし、各欄に入力して「印刷／PDF保存」を押してください。記入位置がずれる場合は「位置調整モード」で各欄をドラッグして合わせると、次回以降も自動再現されます。</p>
+
+    <div class="group">
+      <label for="fileInput">雛形PDF</label>
+      <label id="fileLabel" for="fileInput">クリックしてPDFを選択</label>
+      <input type="file" id="fileInput" accept="application/pdf">
+      <div id="status"></div>
+    </div>
+
+    <div class="group">
+      <label>① 御社名／担当者名</label>
+      <input type="text" id="f_company" placeholder="例：株式会社○○ 山田太郎">
+    </div>
+
+    <div class="group">
+      <label>② 作業開始</label>
+      <input type="datetime-local" id="f_start">
+    </div>
+    <div class="group">
+      <label>③ 作業完了</label>
+      <input type="datetime-local" id="f_complete">
+    </div>
+
+    <div class="group">
+      <label>④ 請求金額（税込）</label>
+      <input type="text" id="f_bill" placeholder="例：￥33,000">
+    </div>
+
+    <div class="group">
+      <label>⑤ 原因</label>
+      <textarea id="f_cause" placeholder="原因を入力"></textarea>
+    </div>
+
+    <div class="group">
+      <label>⑥ 対応内容</label>
+      <textarea id="f_response" placeholder="対応内容を入力"></textarea>
+    </div>
+
+    <div class="group">
+      <label>添付資料</label>
+      <div class="radios">
+        <label><input type="radio" name="attach" value="有り" checked> 有り</label>
+        <label><input type="radio" name="attach" value="無し"> 無し</label>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="toggle">
+        <input type="checkbox" id="adjustMode">
+        <label for="adjustMode" style="margin:0;font-weight:600;">位置調整モード</label>
+      </div>
+      <div class="selinfo" id="selinfo">調整モードON時：欄をドラッグ、または選択して矢印キーで微調整（Shiftで大きく移動）</div>
+    </div>
+
+    <button class="btn primary" id="printBtn">印刷 ／ PDF保存</button>
+    <div class="btnrow">
+      <button class="btn ghost" id="resetPosBtn">位置を初期化</button>
+    </div>
+    <p class="hint">PDF保存のしかた：印刷ダイアログの「送信先／プリンタ」で「PDFに保存」を選び保存します。<br>
+    ※ファイルを直接開いて表示できない場合は同梱の <b>start.command</b> をダブルクリックしてください。</p>
+  </div>
+
+  <!-- ============ 用紙ステージ ============ -->
+  <div id="stage">
+    <div id="page">
+      <canvas id="pdfCanvas" style="display:none;"></canvas>
+      <div id="emptyMsg">← 左の「雛形PDF」からPDFを選択してください</div>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/pdf.min.js"></script>
+<script>
+(function(){
+  "use strict";
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
+  }
+
+  const POS_KEY = "pdfFillPositions_v2";
+
+  // 各記入欄の初期位置（用紙に対する%）。調整モードで動かすとlocalStorageに保存される。
+  const DEFAULTS = {
+    company:    { x:26.0, y:60.4 },
+    s_y:{x:21.5,y:69.0}, s_m:{x:27.5,y:69.0}, s_d:{x:32.8,y:69.0}, s_h:{x:38.3,y:69.0}, s_min:{x:43.6,y:69.0},
+    c_y:{x:21.5,y:71.6}, c_m:{x:27.5,y:71.6}, c_d:{x:32.8,y:71.6}, c_h:{x:38.3,y:71.6}, c_min:{x:43.6,y:71.6},
+    bill:       { x:70.0, y:70.2 },
+    cause:      { x:14.8, y:75.6, w:83, h:6 },
+    response:   { x:14.8, y:82.8, w:83, h:7 },
+    attach_ari: { x:18.5, y:90.0 },
+    attach_nashi:{ x:27.5, y:90.0 }
+  };
+
+  // 欄の定義
+  const FIELDS = [
+    { id:"company",  label:"御社名/担当者名", kind:"text"  },
+    { id:"s_y",  label:"開始 年", kind:"token" },
+    { id:"s_m",  label:"開始 月", kind:"token" },
+    { id:"s_d",  label:"開始 日", kind:"token" },
+    { id:"s_h",  label:"開始 時", kind:"token" },
+    { id:"s_min",label:"開始 分", kind:"token" },
+    { id:"c_y",  label:"完了 年", kind:"token" },
+    { id:"c_m",  label:"完了 月", kind:"token" },
+    { id:"c_d",  label:"完了 日", kind:"token" },
+    { id:"c_h",  label:"完了 時", kind:"token" },
+    { id:"c_min",label:"完了 分", kind:"token" },
+    { id:"bill",     label:"請求金額", kind:"text" },
+    { id:"cause",    label:"原因",     kind:"multi" },
+    { id:"response", label:"対応内容", kind:"multi" },
+    { id:"attach",   label:"添付○",   kind:"marker" }
+  ];
+
+  let positions = loadPositions();
+  let selectedId = null;
+  const overlays = {}; // id -> element
+
+  function loadPositions(){
+    try {
+      const saved = JSON.parse(localStorage.getItem(POS_KEY) || "{}");
+      return Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), saved);
+    } catch(e){ return JSON.parse(JSON.stringify(DEFAULTS)); }
+  }
+  function savePositions(){ localStorage.setItem(POS_KEY, JSON.stringify(positions)); }
+
+  const page = document.getElementById("page");
+
+  // オーバーレイ要素を生成
+  FIELDS.forEach(f=>{
+    const el = document.createElement("div");
+    el.className = "overlay " + f.kind;
+    el.dataset.id = f.id;
+    const lab = document.createElement("span");
+    lab.className = "ovlabel";
+    lab.textContent = f.label;
+    el.appendChild(lab);
+    const content = document.createElement("span");
+    content.className = "ovcontent";
+    el.appendChild(content);
+    page.appendChild(el);
+    overlays[f.id] = el;
+    makeDraggable(el, f.id);
+  });
+
+  function posOf(id){
+    if (id === "attach") {
+      const choice = document.querySelector('input[name=attach]:checked').value;
+      return positions[ choice === "有り" ? "attach_ari" : "attach_nashi" ];
+    }
+    return positions[id];
+  }
+  function activeAttachKey(){
+    const choice = document.querySelector('input[name=attach]:checked').value;
+    return choice === "有り" ? "attach_ari" : "attach_nashi";
+  }
+
+  function layout(){
+    FIELDS.forEach(f=>{
+      const el = overlays[f.id];
+      const p = posOf(f.id);
+      el.style.left = p.x + "%";
+      el.style.top  = p.y + "%";
+      if (f.kind === "multi") {
+        el.style.width  = (p.w||80) + "%";
+        el.style.height = (p.h||6)  + "%";
+      }
+    });
+  }
+
+  // ---- 値の反映 ----
+  function pad(n){ return String(n).padStart(2,"0"); }
+  function parseDT(v){
+    if(!v) return null;
+    const d = new Date(v);
+    if (isNaN(d)) return null;
+    return { y:d.getFullYear(), m:d.getMonth()+1, d:d.getDate(), h:d.getHours(), mi:d.getMinutes() };
+  }
+  function setText(id, txt){ overlays[id].querySelector(".ovcontent").textContent = txt || ""; }
+
+  function render(){
+    setText("company", val("f_company"));
+    setText("bill", val("f_bill"));
+    setText("cause", val("f_cause"));
+    setText("response", val("f_response"));
+
+    const s = parseDT(val("f_start"));
+    setText("s_y", s? s.y : ""); setText("s_m", s? s.m : ""); setText("s_d", s? s.d : "");
+    setText("s_h", s? pad(s.h):""); setText("s_min", s? pad(s.mi):"");
+    const c = parseDT(val("f_complete"));
+    setText("c_y", c? c.y : ""); setText("c_m", c? c.m : ""); setText("c_d", c? c.d : "");
+    setText("c_h", c? pad(c.h):""); setText("c_min", c? pad(c.mi):"");
+
+    // 添付○マーカーは選択中の位置に表示
+    overlays["attach"].querySelector(".ovcontent").textContent = "";
+    layout();
+  }
+  function val(id){ return document.getElementById(id).value.trim(); }
+
+  // ---- ドラッグ＆選択 ----
+  function makeDraggable(el, id){
+    let dragging=false, startX, startY, baseX, baseY, key;
+    el.addEventListener("pointerdown", e=>{
+      if(!document.body.classList.contains("adjust")) return;
+      e.preventDefault();
+      selectOverlay(id);
+      dragging=true;
+      key = (id==="attach") ? activeAttachKey() : id;
+      const rect = page.getBoundingClientRect();
+      startX=e.clientX; startY=e.clientY;
+      baseX=positions[key].x; baseY=positions[key].y;
+      el._rect=rect;
+      el.setPointerCapture(e.pointerId);
+    });
+    el.addEventListener("pointermove", e=>{
+      if(!dragging) return;
+      const rect=el._rect;
+      const dx=(e.clientX-startX)/rect.width*100;
+      const dy=(e.clientY-startY)/rect.height*100;
+      positions[key].x = Math.max(0, Math.min(99, baseX+dx));
+      positions[key].y = Math.max(0, Math.min(99, baseY+dy));
+      layout();
+    });
+    function end(e){ if(dragging){ dragging=false; savePositions(); } }
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+  }
+
+  function selectOverlay(id){
+    selectedId=id;
+    Object.values(overlays).forEach(o=>o.classList.remove("selected"));
+    overlays[id].classList.add("selected");
+    const f = FIELDS.find(x=>x.id===id);
+    document.getElementById("selinfo").textContent = "選択中：" + f.label + "（矢印キーで微調整 / Shiftで大きく）";
+  }
+
+  document.addEventListener("keydown", e=>{
+    if(!document.body.classList.contains("adjust") || !selectedId) return;
+    const tag = document.activeElement.tagName;
+    if(tag==="INPUT"||tag==="TEXTAREA") return;
+    const step = e.shiftKey ? 0.6 : 0.15;
+    let key = (selectedId==="attach") ? activeAttachKey() : selectedId;
+    if(e.key==="ArrowLeft"){ positions[key].x-=step; }
+    else if(e.key==="ArrowRight"){ positions[key].x+=step; }
+    else if(e.key==="ArrowUp"){ positions[key].y-=step; }
+    else if(e.key==="ArrowDown"){ positions[key].y+=step; }
+    else return;
+    e.preventDefault();
+    layout(); savePositions();
+  });
+
+  // ---- PDF読み込み・描画 ----
+  const canvas = document.getElementById("pdfCanvas");
+  const ctx = canvas.getContext("2d");
+  const emptyMsg = document.getElementById("emptyMsg");
+  const status = document.getElementById("status");
+
+  document.getElementById("fileInput").addEventListener("change", async e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    document.getElementById("fileLabel").textContent = file.name;
+    status.textContent = "読み込み中…";
+    try {
+      const buf = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      const pdfPage = await pdf.getPage(1);
+      const scale = 2.5; // 印刷用高解像度
+      const viewport = pdfPage.getViewport({ scale });
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+      canvas.style.display = "block";
+      emptyMsg.style.display = "none";
+      // 用紙の縦横比をPDFに合わせる
+      page.style.height = (210 * canvas.height / canvas.width) + "mm";
+      status.textContent = "読み込み完了（" + Math.round(viewport.width/scale) + "×" + Math.round(viewport.height/scale) + "pt）";
+      render();
+    } catch(err){
+      console.error(err);
+      status.textContent = "読み込み失敗：" + err.message + " — start.command 経由で開いてみてください。";
+    }
+  });
+
+  // ---- UIイベント ----
+  ["f_company","f_start","f_complete","f_bill","f_cause","f_response"].forEach(id=>{
+    document.getElementById(id).addEventListener("input", render);
+  });
+  document.querySelectorAll('input[name=attach]').forEach(r=>r.addEventListener("change", render));
+
+  document.getElementById("adjustMode").addEventListener("change", e=>{
+    document.body.classList.toggle("adjust", e.target.checked);
+    if(!e.target.checked){ selectedId=null; Object.values(overlays).forEach(o=>o.classList.remove("selected")); }
+  });
+
+  document.getElementById("resetPosBtn").addEventListener("click", ()=>{
+    if(!confirm("記入位置を初期状態に戻します。よろしいですか？")) return;
+    positions = JSON.parse(JSON.stringify(DEFAULTS));
+    savePositions(); layout();
+  });
+
+  document.getElementById("printBtn").addEventListener("click", ()=>{
+    if(canvas.style.display==="none"){ alert("先に雛形PDFを選択してください。"); return; }
+    // 印刷時は調整モードを一時解除
+    const wasAdjust = document.body.classList.contains("adjust");
+    document.body.classList.remove("adjust");
+    window.print();
+    if(wasAdjust) document.body.classList.add("adjust");
+  });
+
+  // 初期描画
+  layout();
+})();
+</script>
+</body>
+</html>

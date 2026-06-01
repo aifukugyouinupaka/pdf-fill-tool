@@ -16,8 +16,8 @@
   #panel .sub { font-size:11px; color:#6b7682; margin:0 0 14px; line-height:1.5; }
   .group { margin-bottom:14px; }
   .group > label { display:block; font-size:12px; font-weight:600; margin-bottom:4px; color:#34404a; }
-  .group input[type=text], .group input[type=datetime-local], .group textarea {
-    width:100%; padding:7px 8px; font-size:13px; border:1px solid #c4ccd4; border-radius:6px; font-family:inherit; }
+  .group input[type=text], .group input[type=datetime-local], .group textarea, .group select {
+    width:100%; padding:7px 8px; font-size:13px; border:1px solid #c4ccd4; border-radius:6px; font-family:inherit; background:#fff; }
   .group textarea { resize:vertical; min-height:64px; line-height:1.4; }
   .row2 { display:flex; gap:8px; }
   .row2 > div { flex:1; }
@@ -76,15 +76,34 @@
     <p class="sub">雛形PDFをアップロードし、各欄に入力して「印刷／PDF保存」を押してください。記入位置がずれる場合は「位置調整モード」で各欄をドラッグして合わせると、次回以降も自動再現されます。</p>
 
     <div class="group">
-      <label for="fileInput">雛形PDF</label>
+      <label for="fileInput">雛形PDF（アップロードで自動保存）</label>
       <label id="fileLabel" for="fileInput">クリックしてPDFを選択</label>
       <input type="file" id="fileInput" accept="application/pdf">
       <div id="status"></div>
     </div>
 
     <div class="group">
+      <label for="savedList">保存済みレコード（選択して再編集）</label>
+      <select id="savedList"><option value="">― 新規 ―</option></select>
+      <div class="btnrow">
+        <button class="btn ghost" id="deleteRecBtn" style="font-size:12px;padding:6px;">この保存を削除</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <label for="f_recordno">レコードNO（保存名・自動取得／編集可）</label>
+      <input type="text" id="f_recordno" placeholder="PDFから自動取得します">
+      <div id="saveStatus" class="hint" style="margin-top:4px;"></div>
+    </div>
+
+    <div class="group">
       <label>① 御社名／担当者名</label>
-      <input type="text" id="f_company" placeholder="例：株式会社○○ 山田太郎">
+      <select id="f_company">
+        <option value=""></option>
+        <option>AirTechJapan（株）白石 智</option>
+        <option>AirTechJapan（株）根元 大智</option>
+        <option>AirTechJapan（株）菅 寅也</option>
+      </select>
     </div>
 
     <div class="group">
@@ -365,11 +384,73 @@
     input.value=d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+"T"+pad(d.getHours())+":"+pad(d.getMinutes());
   }
 
-  // ---- PDF読み込み・描画 ----
+  // ---- IndexedDB（レコードNO単位でPDFと入力内容を保存） ----
+  const DB_NAME="pdfFillDB", STORE="records";
+  function openDB(){
+    return new Promise((res,rej)=>{
+      const r=indexedDB.open(DB_NAME,1);
+      r.onupgradeneeded=()=>{ const db=r.result; if(!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE,{keyPath:"recordNo"}); };
+      r.onsuccess=()=>res(r.result);
+      r.onerror=()=>rej(r.error);
+    });
+  }
+  async function dbPut(rec){ const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(STORE,"readwrite"); tx.objectStore(STORE).put(rec); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+  async function dbGet(no){ const db=await openDB(); return new Promise((res,rej)=>{ const q=db.transaction(STORE,"readonly").objectStore(STORE).get(no); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
+  async function dbAll(){ const db=await openDB(); return new Promise((res,rej)=>{ const q=db.transaction(STORE,"readonly").objectStore(STORE).getAll(); q.onsuccess=()=>res(q.result||[]); q.onerror=()=>rej(q.error); }); }
+  async function dbDel(no){ const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(STORE,"readwrite"); tx.objectStore(STORE).delete(no); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+
+  // ---- 保存対象データ ----
+  let currentPdfBytes=null; // ArrayBuffer（pdf.jsには必ずコピーを渡し元を温存）
+  const recordNoEl=document.getElementById("f_recordno");
+  const saveStatusEl=document.getElementById("saveStatus");
+  const savedListEl=document.getElementById("savedList");
+
+  function getRecordNo(){ return recordNoEl.value.trim(); }
+  function setRecordNo(no){ recordNoEl.value=no||""; updateTitle(); }
+  function updateTitle(){ const no=getRecordNo(); document.title = no ? no : "作業完了報告書 記入ツール"; }
+  function setSaveStatus(t){ saveStatusEl.textContent=t||""; }
+
+  function gv(id){ return document.getElementById(id).value; }
+  function setV(id,v){ document.getElementById(id).value=(v==null?"":v); }
+  function currentFields(){
+    return {
+      company:gv("f_company"), start:gv("f_start"), complete:gv("f_complete"),
+      bill:gv("f_bill"), cause:gv("f_cause"), response:gv("f_response"),
+      attach:(document.querySelector('input[name=attach]:checked')||{}).value||"有り"
+    };
+  }
+  function applyFields(f){
+    f=f||{};
+    setV("f_company",f.company); setV("f_start",f.start); setV("f_complete",f.complete);
+    setV("f_bill",f.bill); setV("f_cause",f.cause); setV("f_response",f.response);
+    const r=document.querySelector('input[name=attach][value="'+(f.attach||"有り")+'"]'); if(r) r.checked=true;
+  }
+
+  // ---- PDF描画 ----
   const canvas=document.getElementById("pdfCanvas");
   const ctx=canvas.getContext("2d");
   const emptyMsg=document.getElementById("emptyMsg");
   const status=document.getElementById("status");
+
+  async function renderToCanvas(bytes){
+    const pdf=await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+    const pdfPage=await pdf.getPage(1);
+    const scale=2.5;
+    const viewport=pdfPage.getViewport({ scale });
+    canvas.width=viewport.width; canvas.height=viewport.height;
+    await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+    canvas.style.display="block"; emptyMsg.style.display="none";
+    page.style.height=(210*canvas.height/canvas.width)+"mm";
+    return pdfPage;
+  }
+  async function extractRecordNo(pdfPage){
+    try{
+      const tc=await pdfPage.getTextContent();
+      const text=tc.items.map(i=>i.str).join(" ");
+      const m=text.match(/レコード\s*N\s*O[\s:：]*([A-Za-z0-9\-]{3,})/);
+      return m ? m[1] : "";
+    }catch(e){ return ""; }
+  }
 
   document.getElementById("fileInput").addEventListener("change", async e=>{
     const file=e.target.files[0];
@@ -377,31 +458,84 @@
     document.getElementById("fileLabel").textContent=file.name;
     status.textContent="読み込み中…";
     try{
-      const buf=await file.arrayBuffer();
-      const pdf=await pdfjsLib.getDocument({ data: buf }).promise;
-      const pdfPage=await pdf.getPage(1);
-      const scale=2.5;
-      const viewport=pdfPage.getViewport({ scale });
-      canvas.width=viewport.width; canvas.height=viewport.height;
-      await pdfPage.render({ canvasContext: ctx, viewport }).promise;
-      canvas.style.display="block"; emptyMsg.style.display="none";
-      page.style.height=(210*canvas.height/canvas.width)+"mm";
-      status.textContent="読み込み完了";
+      currentPdfBytes=await file.arrayBuffer();
+      const pdfPage=await renderToCanvas(currentPdfBytes);
+      const no=await extractRecordNo(pdfPage);
+      if(no) setRecordNo(no);
+      status.textContent="読み込み完了"+(no?("（レコードNO: "+no+"）"):"（レコードNO未検出：手入力してください）");
       render();
+      scheduleSave();
     }catch(err){
       console.error(err);
       status.textContent="読み込み失敗："+err.message+" — start.command 経由で開いてみてください。";
     }
   });
 
-  // ---- UIイベント ----
+  // ---- 自動保存 ----
+  let saveTimer=null;
+  function scheduleSave(){ clearTimeout(saveTimer); saveTimer=setTimeout(saveCurrent, 600); }
+  async function saveCurrent(){
+    const no=getRecordNo();
+    if(!no){ setSaveStatus("レコードNO未設定のため未保存"); return; }
+    if(!currentPdfBytes){ setSaveStatus("PDF未選択のため未保存"); return; }
+    try{
+      await dbPut({ recordNo:no, pdf:currentPdfBytes, fields:currentFields(), updatedAt:new Date().toISOString() });
+      setSaveStatus("自動保存済み："+no+"（"+new Date().toLocaleString("ja-JP")+"）");
+      await refreshSavedList(no);
+    }catch(err){ setSaveStatus("保存失敗："+err.message); }
+  }
+
+  async function refreshSavedList(selected){
+    let recs=[];
+    try{ recs=await dbAll(); }catch(e){}
+    recs.sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||""));
+    savedListEl.innerHTML='<option value="">― 新規 ―</option>';
+    recs.forEach(r=>{
+      const o=document.createElement("option");
+      o.value=r.recordNo;
+      o.textContent=r.recordNo+"（"+(r.updatedAt?new Date(r.updatedAt).toLocaleString("ja-JP"):"")+"）";
+      savedListEl.appendChild(o);
+    });
+    if(selected!=null) savedListEl.value=selected;
+  }
+
+  savedListEl.addEventListener("change", async e=>{
+    const no=e.target.value;
+    if(!no) return; // 「新規」: 現状維持
+    try{
+      const rec=await dbGet(no);
+      if(!rec){ setSaveStatus("レコードが見つかりません："+no); return; }
+      currentPdfBytes=rec.pdf;
+      status.textContent="読み込み中…";
+      await renderToCanvas(rec.pdf);
+      applyFields(rec.fields);
+      setRecordNo(rec.recordNo);
+      status.textContent="保存レコードを読込："+no;
+      render();
+      setSaveStatus("読込："+no);
+    }catch(err){ setSaveStatus("読込失敗："+err.message); }
+  });
+
+  document.getElementById("deleteRecBtn").addEventListener("click", async ()=>{
+    const no=savedListEl.value || getRecordNo();
+    if(!no){ alert("削除する保存レコードを選択してください。"); return; }
+    if(!confirm("「"+no+"」の保存データ（PDFと入力内容）を削除します。よろしいですか？")) return;
+    try{ await dbDel(no); await refreshSavedList(""); setSaveStatus("削除しました："+no); }
+    catch(err){ setSaveStatus("削除失敗："+err.message); }
+  });
+
+  // ---- 入力イベント ----
+  function onFieldChange(){ render(); scheduleSave(); }
   ["f_company","f_start","f_complete","f_bill","f_cause","f_response"].forEach(id=>{
-    document.getElementById(id).addEventListener("input", render);
+    const el=document.getElementById(id);
+    el.addEventListener("input", onFieldChange);
+    el.addEventListener("change", onFieldChange);
   });
   ["f_start","f_complete"].forEach(id=>{
-    document.getElementById(id).addEventListener("change", e=>{ snap30(e.target); render(); });
+    document.getElementById(id).addEventListener("change", e=>{ snap30(e.target); onFieldChange(); });
   });
-  document.querySelectorAll('input[name=attach]').forEach(r=>r.addEventListener("change", render));
+  document.querySelectorAll('input[name=attach]').forEach(r=>r.addEventListener("change", onFieldChange));
+  recordNoEl.addEventListener("input", ()=>{ updateTitle(); scheduleSave(); });
 
   const dtScaleEl=document.getElementById("dtScale");
   dtScaleEl.value=positions.dtScale||1;
@@ -429,6 +563,8 @@
   });
 
   layout();
+  updateTitle();
+  refreshSavedList("");
 })();
 </script>
 </body>

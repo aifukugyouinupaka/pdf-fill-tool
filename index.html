@@ -425,6 +425,7 @@
     setV("f_bill",f.bill); setV("f_cause",f.cause); setV("f_response",f.response);
     const r=document.querySelector('input[name=attach][value="'+(f.attach||"有り")+'"]'); if(r) r.checked=true;
   }
+  function resetFields(){ applyFields({ attach:"有り" }); }
 
   // ---- PDF描画 ----
   const canvas=document.getElementById("pdfCanvas");
@@ -461,8 +462,15 @@
       currentPdfBytes=await file.arrayBuffer();
       const pdfPage=await renderToCanvas(currentPdfBytes);
       const no=await extractRecordNo(pdfPage);
-      if(no) setRecordNo(no);
-      status.textContent="読み込み完了"+(no?("（レコードNO: "+no+"）"):"（レコードNO未検出：手入力してください）");
+      resetFields();          // 前のファイルの入力内容をクリア
+      setRecordNo(no||"");    // 新ファイルのレコードNOに置換（取得不可なら空）
+      savedListEl.value="";   // プルダウンを「新規」に戻す
+      let loaded=false;
+      if(no){
+        const existing=await dbGet(no);
+        if(existing){ applyFields(existing.fields); loaded=true; }
+      }
+      status.textContent="読み込み完了"+(no?("（レコードNO: "+no+(loaded?" / 既存の入力を復元":"")+"）"):"（レコードNO未検出：手入力してください）");
       render();
       scheduleSave();
     }catch(err){

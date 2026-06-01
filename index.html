@@ -55,8 +55,17 @@
   .ovlabel { position:absolute; top:-14px; left:0; font-size:9px; color:var(--accent); background:#fff; padding:0 2px; white-space:nowrap; display:none; }
   body.adjust .ovlabel { display:block; }
 
+  /* 合言葉モーダル */
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:1000; }
+  .modalbox { background:#fff; border-radius:12px; padding:22px; width:320px; max-width:90vw; box-shadow:0 8px 40px rgba(0,0,0,.3); }
+  .modalbox h2 { font-size:16px; margin:0 0 8px; }
+  .modalbox p { font-size:12px; color:#6b7682; line-height:1.6; margin:0 0 12px; }
+  .modalbox input { width:100%; padding:9px 10px; font-size:14px; border:1px solid #c4ccd4; border-radius:6px; margin-bottom:8px; }
+  #passMsg { font-size:12px; min-height:16px; margin-bottom:8px; }
+
   /* 印刷 */
   @media print {
+    .modal { display:none !important; }
     @page { size: A4 portrait; margin:0; }
     body * { visibility:hidden; }
     #page, #page * { visibility:visible; }
@@ -80,6 +89,15 @@
       <label id="fileLabel" for="fileInput">クリックしてPDFを選択</label>
       <input type="file" id="fileInput" accept="application/pdf">
       <div id="status"></div>
+    </div>
+
+    <div class="group">
+      <label>クラウド同期（複数端末で共有）</label>
+      <div id="syncStatus" class="hint" style="margin-top:0;">確認中…</div>
+      <div class="btnrow">
+        <button class="btn ghost" id="syncNowBtn" style="font-size:12px;padding:6px;">今すぐ同期</button>
+        <button class="btn ghost" id="passBtn" style="font-size:12px;padding:6px;">合言葉の設定</button>
+      </div>
     </div>
 
     <div class="group">
@@ -168,6 +186,20 @@
   </div>
 </div>
 
+<!-- 合言葉モーダル -->
+<div id="passModal" class="modal" style="display:none;">
+  <div class="modalbox">
+    <h2>クラウド同期の合言葉</h2>
+    <p>複数の端末で記録を共有するための合言葉を入力してください。合言葉を知っている端末だけがデータを読み書きできます。</p>
+    <input type="password" id="passInput" placeholder="合言葉" autocomplete="off">
+    <div id="passMsg"></div>
+    <div class="btnrow">
+      <button class="btn primary" id="passOk">接続する</button>
+      <button class="btn ghost" id="passSkip">あとで</button>
+    </div>
+  </div>
+</div>
+
 <script src="vendor/pdf.min.js"></script>
 <script>
 (function(){
@@ -178,6 +210,66 @@
 
   const POS_KEY = "pdfFillPositions_v3";
   const LAST_KEY = "pdfFillLastRecord";   // 直近に開いていたレコードNO（更新時の復元用）
+
+  // ---- クラウド同期（Supabase / PostgREST + 合言葉ヘッダ）----
+  // URL と公開キーは公開可（合言葉が無ければデータは読めないため安全）。合言葉はコードに埋め込まない。
+  const SUPABASE_URL = "https://rxongohftdtupupvghvr.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_wEldUm46Vbq5fsrSz4MVCA_PZzkVtyW";
+  const PASS_KEY = "pdfFillCloudPass";    // 合言葉（localStorage）
+  const SKIP_KEY = "pdfFillCloudSkip";    // 「あとで」を選んだフラグ
+
+  function getPass(){ return localStorage.getItem(PASS_KEY) || ""; }
+  function cloudHeaders(extra){
+    return Object.assign({
+      apikey: SUPABASE_KEY,
+      Authorization: "Bearer " + SUPABASE_KEY,
+      "x-app-secret": getPass()
+    }, extra || {});
+  }
+  function bufToB64(buf){
+    const bytes=new Uint8Array(buf); let bin=""; const chunk=0x8000;
+    for(let i=0;i<bytes.length;i+=chunk){ bin+=String.fromCharCode.apply(null, bytes.subarray(i,i+chunk)); }
+    return btoa(bin);
+  }
+  function b64ToBuf(b64){
+    const bin=atob(b64); const len=bin.length; const bytes=new Uint8Array(len);
+    for(let i=0;i<len;i++) bytes[i]=bin.charCodeAt(i);
+    return bytes.buffer;
+  }
+  function tms(s){ const t=Date.parse(s||""); return isNaN(t)?0:t; }
+
+  async function validatePass(p){
+    const h={ apikey:SUPABASE_KEY, Authorization:"Bearer "+SUPABASE_KEY, "x-app-secret":p,
+      "Content-Type":"application/json", Prefer:"resolution=merge-duplicates,return=minimal" };
+    const r=await fetch(SUPABASE_URL+"/rest/v1/reports", { method:"POST", headers:h,
+      body:JSON.stringify({ record_no:"__auth_check__", fields:{}, updated_at:new Date().toISOString() }) });
+    if(r.ok){
+      try{ await fetch(SUPABASE_URL+"/rest/v1/reports?record_no=eq.__auth_check__", { method:"DELETE", headers:h }); }catch(e){}
+      return true;
+    }
+    return false;
+  }
+  async function cloudPush(rec){
+    if(!getPass()) return;
+    const body={ record_no:rec.recordNo, fields:rec.fields||{},
+      pdf_base64: rec.pdf ? bufToB64(rec.pdf) : null, updated_at: rec.updatedAt };
+    const r=await fetch(SUPABASE_URL+"/rest/v1/reports",
+      { method:"POST", headers:cloudHeaders({ "Content-Type":"application/json", Prefer:"resolution=merge-duplicates,return=minimal" }),
+        body:JSON.stringify(body) });
+    if(!r.ok) throw new Error("クラウド保存 "+r.status);
+  }
+  async function cloudPullAll(){
+    if(!getPass()) return [];
+    const r=await fetch(SUPABASE_URL+"/rest/v1/reports?select=record_no,fields,pdf_base64,updated_at",
+      { headers:cloudHeaders() });
+    if(!r.ok) throw new Error("クラウド取得 "+r.status);
+    return await r.json();
+  }
+  async function cloudDelete(no){
+    if(!getPass()) return;
+    try{ await fetch(SUPABASE_URL+"/rest/v1/reports?record_no=eq."+encodeURIComponent(no),
+      { method:"DELETE", headers:cloudHeaders() }); }catch(e){}
+  }
 
   // 日時5項目(年月日時分)の、年からの横オフセット（用紙幅に対する%）
   const DT_OFFSETS = [0, 6.0, 11.3, 16.8, 22.1];
@@ -488,10 +580,18 @@
     if(!no){ setSaveStatus("レコードNO未設定のため未保存"); return; }
     if(!currentPdfBytes){ setSaveStatus("PDF未選択のため未保存"); return; }
     try{
-      await dbPut({ recordNo:no, pdf:currentPdfBytes, fields:currentFields(), updatedAt:new Date().toISOString() });
+      const updatedAt=new Date().toISOString();
+      const rec={ recordNo:no, pdf:currentPdfBytes, fields:currentFields(), updatedAt };
+      await dbPut(rec);
       localStorage.setItem(LAST_KEY, no);
       setSaveStatus("自動保存済み："+no+"（"+new Date().toLocaleString("ja-JP")+"）");
       await refreshSavedList(no);
+      // クラウドへ反映（合言葉設定時のみ）
+      if(getPass()){
+        setSyncStatus("クラウドへ保存中…");
+        try{ await cloudPush(rec); setSyncStatus("クラウド保存済み："+no+"（"+new Date().toLocaleTimeString("ja-JP")+"）"); }
+        catch(e){ setSyncStatus("クラウド保存失敗："+e.message+"（ローカルには保存済み）"); }
+      }
     }catch(err){ setSaveStatus("保存失敗："+err.message); }
   }
 
@@ -533,6 +633,7 @@
     if(!confirm("「"+no+"」の保存データ（PDFと入力内容）を削除します。よろしいですか？")) return;
     try{
       await dbDel(no);
+      if(getPass()) await cloudDelete(no);
       if(localStorage.getItem(LAST_KEY)===no) localStorage.removeItem(LAST_KEY);
       await refreshSavedList("");
       setSaveStatus("削除しました："+no);
@@ -578,12 +679,73 @@
     if(wasAdjust) document.body.classList.add("adjust");
   });
 
+  // ---- クラウド同期 UI ----
+  const syncStatusEl=document.getElementById("syncStatus");
+  function setSyncStatus(t){ syncStatusEl.textContent=t||""; }
+
+  async function syncFromCloud(){
+    if(!getPass()){ setSyncStatus("この端末のみ（合言葉未設定）"); return; }
+    setSyncStatus("同期中…");
+    try{
+      const remote=await cloudPullAll();
+      const rmap={}; remote.forEach(r=>{ if(r.record_no!=="__auth_check__") rmap[r.record_no]=r; });
+      const locals=await dbAll();
+      let pulled=0, pushed=0;
+      // 取得：クラウドが新しい/ローカルに無い
+      for(const no in rmap){
+        const rr=rmap[no];
+        const local=locals.find(l=>l.recordNo===no);
+        if(!local || tms(rr.updated_at) > tms(local.updatedAt)){
+          await dbPut({ recordNo:no,
+            pdf: rr.pdf_base64 ? b64ToBuf(rr.pdf_base64) : (local?local.pdf:null),
+            fields: rr.fields||{}, updatedAt: rr.updated_at });
+          pulled++;
+        }
+      }
+      // 送信：ローカルが新しい/クラウドに無い
+      for(const l of locals){
+        const rr=rmap[l.recordNo];
+        if(!rr || tms(l.updatedAt) > tms(rr.updated_at)){ await cloudPush(l); pushed++; }
+      }
+      await refreshSavedList(savedListEl.value||"");
+      setSyncStatus("同期完了（取得"+pulled+"・送信"+pushed+"・"+new Date().toLocaleTimeString("ja-JP")+"）");
+    }catch(e){ setSyncStatus("同期失敗："+e.message); }
+  }
+
+  // ---- 合言葉モーダル ----
+  const passModal=document.getElementById("passModal");
+  const passInput=document.getElementById("passInput");
+  const passMsg=document.getElementById("passMsg");
+  function openPassModal(){ passInput.value=getPass(); passMsg.textContent=""; passModal.style.display="flex"; passInput.focus(); }
+  function closePassModal(){ passModal.style.display="none"; }
+  document.getElementById("passBtn").addEventListener("click", openPassModal);
+  document.getElementById("syncNowBtn").addEventListener("click", syncFromCloud);
+  document.getElementById("passSkip").addEventListener("click", ()=>{ localStorage.setItem(SKIP_KEY,"1"); closePassModal(); setSyncStatus("この端末のみ（合言葉未設定）"); });
+  document.getElementById("passOk").addEventListener("click", async ()=>{
+    const p=passInput.value.trim();
+    if(!p){ passMsg.style.color="#c0392b"; passMsg.textContent="合言葉を入力してください。"; return; }
+    passMsg.style.color="#6b7682"; passMsg.textContent="確認中…";
+    try{
+      const ok=await validatePass(p);
+      if(!ok){ passMsg.style.color="#c0392b"; passMsg.textContent="合言葉が違うか、接続できません。"; return; }
+      localStorage.setItem(PASS_KEY, p);
+      localStorage.removeItem(SKIP_KEY);
+      closePassModal();
+      await syncFromCloud();
+    }catch(e){ passMsg.style.color="#c0392b"; passMsg.textContent="エラー："+e.message; }
+  });
+  passInput.addEventListener("keydown", e=>{ if(e.key==="Enter") document.getElementById("passOk").click(); });
+
   async function init(){
     layout();
     updateTitle();
     // ブラウザにデータを消されにくくする（永続ストレージ要求）
     if(navigator.storage && navigator.storage.persist){ try{ await navigator.storage.persist(); }catch(e){} }
     await refreshSavedList("");
+    // クラウド同期：合言葉があれば取得、無ければ初回のみ案内
+    if(getPass()){ await syncFromCloud(); }
+    else if(!localStorage.getItem(SKIP_KEY)){ openPassModal(); setSyncStatus("この端末のみ（合言葉未設定）"); }
+    else { setSyncStatus("この端末のみ（合言葉未設定）"); }
     // 更新前に開いていたレコードを自動復元
     const last=localStorage.getItem(LAST_KEY);
     if(last){

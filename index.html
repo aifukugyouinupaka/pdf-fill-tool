@@ -177,6 +177,7 @@
   }
 
   const POS_KEY = "pdfFillPositions_v3";
+  const LAST_KEY = "pdfFillLastRecord";   // 直近に開いていたレコードNO（更新時の復元用）
 
   // 日時5項目(年月日時分)の、年からの横オフセット（用紙幅に対する%）
   const DT_OFFSETS = [0, 6.0, 11.3, 16.8, 22.1];
@@ -488,6 +489,7 @@
     if(!currentPdfBytes){ setSaveStatus("PDF未選択のため未保存"); return; }
     try{
       await dbPut({ recordNo:no, pdf:currentPdfBytes, fields:currentFields(), updatedAt:new Date().toISOString() });
+      localStorage.setItem(LAST_KEY, no);
       setSaveStatus("自動保存済み："+no+"（"+new Date().toLocaleString("ja-JP")+"）");
       await refreshSavedList(no);
     }catch(err){ setSaveStatus("保存失敗："+err.message); }
@@ -518,6 +520,7 @@
       await renderToCanvas(rec.pdf);
       applyFields(rec.fields);
       setRecordNo(rec.recordNo);
+      localStorage.setItem(LAST_KEY, no);
       status.textContent="保存レコードを読込："+no;
       render();
       setSaveStatus("読込："+no);
@@ -528,7 +531,12 @@
     const no=savedListEl.value || getRecordNo();
     if(!no){ alert("削除する保存レコードを選択してください。"); return; }
     if(!confirm("「"+no+"」の保存データ（PDFと入力内容）を削除します。よろしいですか？")) return;
-    try{ await dbDel(no); await refreshSavedList(""); setSaveStatus("削除しました："+no); }
+    try{
+      await dbDel(no);
+      if(localStorage.getItem(LAST_KEY)===no) localStorage.removeItem(LAST_KEY);
+      await refreshSavedList("");
+      setSaveStatus("削除しました："+no);
+    }
     catch(err){ setSaveStatus("削除失敗："+err.message); }
   });
 
@@ -570,9 +578,32 @@
     if(wasAdjust) document.body.classList.add("adjust");
   });
 
-  layout();
-  updateTitle();
-  refreshSavedList("");
+  async function init(){
+    layout();
+    updateTitle();
+    // ブラウザにデータを消されにくくする（永続ストレージ要求）
+    if(navigator.storage && navigator.storage.persist){ try{ await navigator.storage.persist(); }catch(e){} }
+    await refreshSavedList("");
+    // 更新前に開いていたレコードを自動復元
+    const last=localStorage.getItem(LAST_KEY);
+    if(last){
+      try{
+        const rec=await dbGet(last);
+        if(rec){
+          currentPdfBytes=rec.pdf;
+          status.textContent="前回の作業を復元中…";
+          await renderToCanvas(rec.pdf);
+          applyFields(rec.fields);
+          setRecordNo(rec.recordNo);
+          savedListEl.value=rec.recordNo;
+          render();
+          status.textContent="前回の作業を復元しました（レコードNO: "+last+"）";
+          setSaveStatus("前回の作業を復元："+last);
+        }
+      }catch(e){ console.error(e); }
+    }
+  }
+  init();
 })();
 </script>
 </body>

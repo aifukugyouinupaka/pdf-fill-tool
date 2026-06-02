@@ -225,6 +225,10 @@
     <div class="btnrow">
       <button class="btn ghost" id="resetPosBtn">位置を初期化</button>
     </div>
+    <div class="btnrow">
+      <button class="btn ghost" id="exportPosBtn" style="font-size:12px;padding:6px;">位置データを書き出す</button>
+      <button class="btn ghost" id="importPosBtn" style="font-size:12px;padding:6px;">位置データを読み込む</button>
+    </div>
     <p class="hint">PDF保存のしかた：印刷ダイアログの「送信先／プリンタ」で「PDFに保存」を選び保存します。<br>
     ※ファイルを直接開いて表示できない場合は同梱の <b>start.command</b> をダブルクリックしてください。</p>
   </div>
@@ -726,6 +730,25 @@
     savePositions();
     dtScaleEl.value=positions.dtScale;
     layout();
+  });
+
+  // ---- 位置データの書き出し / 読み込み ----
+  document.getElementById("exportPosBtn").addEventListener("click", async ()=>{
+    const json=JSON.stringify(positions);
+    try{ await navigator.clipboard.writeText(json); }catch(e){}
+    window.prompt("位置データ（コピー済み。これを共有・保存できます）", json);
+  });
+  document.getElementById("importPosBtn").addEventListener("click", ()=>{
+    const s=window.prompt("位置データ（JSON）を貼り付けてください");
+    if(!s) return;
+    try{
+      const obj=JSON.parse(s);
+      positions=Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), obj);
+      savePositions();
+      dtScaleEl.value=positions.dtScale||1;
+      layout();
+      alert("位置データを読み込みました。");
+    }catch(e){ alert("読み込み失敗：JSON形式が正しくありません。"); }
   });
 
   // ---- ツール切替（作業完了報告書 / 写真報告書）----

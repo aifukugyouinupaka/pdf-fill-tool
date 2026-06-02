@@ -220,6 +220,10 @@
       <label>日時の文字間隔（年〜分の幅）</label>
       <input type="range" id="dtScale" min="0.6" max="1.6" step="0.02" value="1" style="width:100%">
     </div>
+    <div class="group">
+      <label>日時の文字サイズ</label>
+      <input type="range" id="dtFont" min="8" max="16" step="0.5" value="13" style="width:100%">
+    </div>
 
     <button class="btn primary" id="printBtn">印刷 ／ PDF保存</button>
     <div class="btnrow">
@@ -346,7 +350,8 @@
     response:   { x:14.42, y:68.48, w:83, h:7 },
     attach_ari: { x:17.92, y:73.18 },
     attach_nashi:{ x:27.5, y:90.0 },
-    dtScale:    1.04
+    dtScale:    1.04,
+    dtFontPx:   13
   };
 
   // 単一欄
@@ -440,12 +445,14 @@
     placeMulti("response", positions.response);
     place("attach", positions[activeAttachKey()]);
     const scale=positions.dtScale||1;
+    const fpx=positions.dtFontPx||13;
     GROUPS.forEach(g=>{
       const a=positions[g.id];
       DT_KEYS.forEach((k,idx)=>{
         const el=overlays[g.id+"_"+idx];
         el.style.left=(a.x + DT_OFFSETS[idx]*scale)+"%";
         el.style.top =a.y+"%";
+        el.style.fontSize=fpx+"px";
       });
     });
   }
@@ -463,7 +470,7 @@
   function setText(id, txt){ overlays[id].querySelector(".ovcontent").textContent=(txt==null?"":txt); }
 
   function fillGroup(gid, dt){
-    const vals = dt ? [dt.y, dt.m, dt.d, pad(dt.h), pad(dt.mi)] : ["","","","",""];
+    const vals = dt ? [dt.y, dt.m, dt.d, dt.h, dt.mi] : ["","","","",""];
     DT_KEYS.forEach((k,idx)=> setText(gid+"_"+idx, vals[idx]));
   }
 
@@ -719,6 +726,10 @@
   dtScaleEl.value=positions.dtScale||1;
   dtScaleEl.addEventListener("input", e=>{ positions.dtScale=parseFloat(e.target.value); layout(); savePositions(); });
 
+  const dtFontEl=document.getElementById("dtFont");
+  dtFontEl.value=positions.dtFontPx||13;
+  dtFontEl.addEventListener("input", e=>{ positions.dtFontPx=parseFloat(e.target.value); layout(); savePositions(); });
+
   document.getElementById("adjustMode").addEventListener("change", e=>{
     document.body.classList.toggle("adjust", e.target.checked);
     if(!e.target.checked){ selectedKey=null; Object.values(overlays).forEach(o=>o.classList.remove("selected")); }
@@ -729,6 +740,7 @@
     positions=JSON.parse(JSON.stringify(DEFAULTS));
     savePositions();
     dtScaleEl.value=positions.dtScale;
+    dtFontEl.value=positions.dtFontPx;
     layout();
   });
 
@@ -746,6 +758,7 @@
       positions=Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), obj);
       savePositions();
       dtScaleEl.value=positions.dtScale||1;
+      dtFontEl.value=positions.dtFontPx||13;
       layout();
       alert("位置データを読み込みました。");
     }catch(e){ alert("読み込み失敗：JSON形式が正しくありません。"); }

@@ -8,7 +8,16 @@
   :root { --accent:#1769aa; }
   * { box-sizing: border-box; }
   html,body { margin:0; padding:0; font-family:-apple-system,"Hiragino Kaku Gothic ProN",sans-serif; color:#1b1b1b; background:#eef1f4; }
-  #app { display:flex; min-height:100vh; }
+  #app { display:flex; min-height:calc(100vh - 46px); }
+
+  /* 上部：ツール切替タブ（作業完了報告書 / 写真報告書） */
+  #toolTabs { display:flex; background:#fff; border-bottom:1px solid #d7dde3; position:sticky; top:0; z-index:200; }
+  #toolTabs button { padding:12px 22px; font-size:14px; font-weight:700; border:none; background:#fff; color:#7a838c; cursor:pointer; border-bottom:3px solid transparent; -webkit-tap-highlight-color:transparent; }
+  #toolTabs button.active { color:var(--accent); border-bottom-color:var(--accent); }
+  #photoView { display:none; width:100%; height:calc(100vh - 46px); }
+  #photoFrame { width:100%; height:100%; border:none; display:block; }
+  body.phototool #app { display:none; }
+  body.phototool #photoView { display:block; }
 
   /* 左：操作パネル */
   #panel { width:340px; flex:0 0 340px; background:#fff; border-right:1px solid #d7dde3; padding:16px; overflow-y:auto; height:100vh; position:sticky; top:0; }
@@ -70,7 +79,7 @@
   @media (max-width: 760px) {
     #app { flex-direction:column; }
     #viewTabs {
-      display:flex; position:sticky; top:0; z-index:50;
+      display:flex; position:sticky; top:46px; z-index:50;
       background:#fff; border-bottom:1px solid #d7dde3;
     }
     #viewTabs button {
@@ -94,6 +103,8 @@
   /* 印刷 */
   @media print {
     #viewTabs { display:none !important; }
+    #toolTabs { display:none !important; }
+    #photoView { display:none !important; }
     .modal { display:none !important; }
     @page { size: A4 portrait; margin:0; }
     body * { visibility:hidden; }
@@ -107,6 +118,12 @@
 </style>
 </head>
 <body>
+<!-- 上部：ツール切替タブ -->
+<div id="toolTabs" class="no-print">
+  <button id="ttReport" class="active" type="button">作業完了報告書</button>
+  <button id="ttPhoto" type="button">写真報告書</button>
+</div>
+
 <div id="app">
   <!-- スマホ用：入力／プレビュー切替タブ -->
   <div id="viewTabs" class="no-print">
@@ -219,6 +236,11 @@
       <div id="emptyMsg">← 左の「雛形PDF」からPDFを選択してください</div>
     </div>
   </div>
+</div>
+
+<!-- 写真報告書（埋め込み） -->
+<div id="photoView">
+  <iframe id="photoFrame" title="写真報告書" referrerpolicy="no-referrer"></iframe>
 </div>
 
 <!-- 合言葉モーダル -->
@@ -705,6 +727,22 @@
     dtScaleEl.value=positions.dtScale;
     layout();
   });
+
+  // ---- ツール切替（作業完了報告書 / 写真報告書）----
+  const PHOTO_URL="https://fluffy-crisp-d434c9.netlify.app/";
+  const ttReport=document.getElementById("ttReport");
+  const ttPhoto=document.getElementById("ttPhoto");
+  const photoFrame=document.getElementById("photoFrame");
+  function showTool(which){
+    const photo = which==="photo";
+    if(photo && !photoFrame.src){ photoFrame.src=PHOTO_URL; } // 初回クリック時のみ読込
+    document.body.classList.toggle("phototool", photo);
+    ttPhoto.classList.toggle("active", photo);
+    ttReport.classList.toggle("active", !photo);
+    window.scrollTo(0,0);
+  }
+  ttReport.addEventListener("click", ()=>showTool("report"));
+  ttPhoto.addEventListener("click", ()=>showTool("photo"));
 
   // ---- スマホ：入力／プレビュー切替 ----
   const tabInput=document.getElementById("tabInput");

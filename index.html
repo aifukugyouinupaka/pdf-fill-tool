@@ -63,8 +63,37 @@
   .modalbox input { width:100%; padding:9px 10px; font-size:14px; border:1px solid #c4ccd4; border-radius:6px; margin-bottom:8px; }
   #passMsg { font-size:12px; min-height:16px; margin-bottom:8px; }
 
+  /* モバイル切替タブ（PCでは非表示） */
+  #viewTabs { display:none; }
+
+  /* スマホ：入力とプレビューをタブで分けて全幅表示 */
+  @media (max-width: 760px) {
+    #app { flex-direction:column; }
+    #viewTabs {
+      display:flex; position:sticky; top:0; z-index:50;
+      background:#fff; border-bottom:1px solid #d7dde3;
+    }
+    #viewTabs button {
+      flex:1; padding:13px 8px; font-size:15px; font-weight:600;
+      border:none; background:#fff; color:#7a838c; cursor:pointer;
+      border-bottom:3px solid transparent; -webkit-tap-highlight-color:transparent;
+    }
+    #viewTabs button.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+    #panel { width:100%; flex:none; height:auto; position:static; border-right:none; }
+    #stage { padding:12px; }
+    #page { width:100%; height:auto !important; }
+
+    /* 既定は入力を表示、プレビュー時は切替 */
+    #panel { display:block; }
+    #stage { display:none; }
+    body.showpreview #panel { display:none; }
+    body.showpreview #stage { display:flex; }
+  }
+
   /* 印刷 */
   @media print {
+    #viewTabs { display:none !important; }
     .modal { display:none !important; }
     @page { size: A4 portrait; margin:0; }
     body * { visibility:hidden; }
@@ -79,6 +108,12 @@
 </head>
 <body>
 <div id="app">
+  <!-- スマホ用：入力／プレビュー切替タブ -->
+  <div id="viewTabs" class="no-print">
+    <button id="tabInput" class="active" type="button">入力</button>
+    <button id="tabPreview" type="button">プレビュー</button>
+  </div>
+
   <!-- ============ 操作パネル ============ -->
   <div id="panel" class="no-print">
     <h1>作業完了報告書 記入ツール</h1>
@@ -670,6 +705,19 @@
     dtScaleEl.value=positions.dtScale;
     layout();
   });
+
+  // ---- スマホ：入力／プレビュー切替 ----
+  const tabInput=document.getElementById("tabInput");
+  const tabPreview=document.getElementById("tabPreview");
+  function showView(which){
+    const preview = which==="preview";
+    document.body.classList.toggle("showpreview", preview);
+    tabPreview.classList.toggle("active", preview);
+    tabInput.classList.toggle("active", !preview);
+    window.scrollTo(0,0);
+  }
+  tabInput.addEventListener("click", ()=>showView("input"));
+  tabPreview.addEventListener("click", ()=>showView("preview"));
 
   document.getElementById("printBtn").addEventListener("click", ()=>{
     if(canvas.style.display==="none"){ alert("先に雛形PDFを選択してください。"); return; }

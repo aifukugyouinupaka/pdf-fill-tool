@@ -48,7 +48,8 @@
   /* 右：用紙ステージ */
   #stage { flex:1; padding:24px; overflow:auto; display:flex; justify-content:center; align-items:flex-start; }
   #page { position:relative; width:210mm; background:#fff; box-shadow:0 2px 16px rgba(0,0,0,.18); }
-  #pdfCanvas { display:block; width:100%; height:auto; }
+  #pdfCanvas { display:none; }
+  #pdfImg { display:block; width:100%; height:auto; }
   #emptyMsg { padding:120px 20px; text-align:center; color:#9aa4ad; font-size:14px; }
 
   .overlay { position:absolute; transform:translate(0,0); white-space:pre-wrap; line-height:1.3;
@@ -241,6 +242,7 @@
   <div id="stage">
     <div id="page">
       <canvas id="pdfCanvas" style="display:none;"></canvas>
+      <img id="pdfImg" alt="" style="display:none;">
       <div id="emptyMsg">← 左の「雛形PDF」からPDFを選択してください</div>
     </div>
   </div>
@@ -591,6 +593,7 @@
   // ---- PDF描画 ----
   const canvas=document.getElementById("pdfCanvas");
   const ctx=canvas.getContext("2d");
+  const pdfImg=document.getElementById("pdfImg");
   const emptyMsg=document.getElementById("emptyMsg");
   const status=document.getElementById("status");
 
@@ -601,7 +604,9 @@
     const viewport=pdfPage.getViewport({ scale });
     canvas.width=viewport.width; canvas.height=viewport.height;
     await pdfPage.render({ canvasContext: ctx, viewport }).promise;
-    canvas.style.display="block"; emptyMsg.style.display="none";
+    // 印刷時に大きな <canvas> がChromeで誤レンダリングされるため、PNG化して <img> で表示する
+    pdfImg.src=canvas.toDataURL("image/png");
+    pdfImg.style.display="block"; emptyMsg.style.display="none";
     page.style.height=(210*canvas.height/canvas.width)+"mm";
     return pdfPage;
   }
@@ -794,7 +799,7 @@
   tabPreview.addEventListener("click", ()=>showView("preview"));
 
   document.getElementById("printBtn").addEventListener("click", ()=>{
-    if(canvas.style.display==="none"){ alert("先に雛形PDFを選択してください。"); return; }
+    if(pdfImg.style.display==="none"){ alert("先に雛形PDFを選択してください。"); return; }
     const wasAdjust=document.body.classList.contains("adjust");
     document.body.classList.remove("adjust");
     window.print();

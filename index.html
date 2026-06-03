@@ -907,7 +907,11 @@
       pg.drawImage(png, { x:0, y:0, width:pw, height:ph });
       const bytes=await doc.save();
       const no=getRecordNo();
-      const fname="作業完了報告書"+(no?("_"+no):"")+".pdf";
+      // ファイル名: 年月日_レコードNO_作業完了報告書.pdf
+      // 日付は作業完了日を優先、無ければ作業開始日。欠けた要素は自動で省く。
+      const dt=parseDT(val("f_complete"))||parseDT(val("f_start"));
+      const ymd=dt ? (dt.y+pad(dt.m)+pad(dt.d)) : "";
+      const fname=[ymd, no, "作業完了報告書"].filter(Boolean).join("_")+".pdf";
       const blob=new Blob([bytes], { type:"application/pdf" });
       const url=URL.createObjectURL(blob);
       const a=document.createElement("a");

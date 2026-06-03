@@ -226,16 +226,17 @@
       <input type="range" id="dtFont" min="8" max="16" step="0.5" value="13" style="width:100%">
     </div>
 
-    <button class="btn primary" id="printBtn">印刷 ／ PDF保存</button>
+    <button class="btn primary" id="pdfBtn">PDF作成（ダウンロード）</button>
     <div class="btnrow">
-      <button class="btn ghost" id="resetPosBtn">位置を初期化</button>
+      <button class="btn ghost" id="printBtn" style="font-size:12px;padding:6px;">ブラウザ印刷（予備）</button>
+      <button class="btn ghost" id="resetPosBtn" style="font-size:12px;padding:6px;">位置を初期化</button>
     </div>
     <div class="btnrow">
       <button class="btn ghost" id="exportPosBtn" style="font-size:12px;padding:6px;">位置データを書き出す</button>
       <button class="btn ghost" id="importPosBtn" style="font-size:12px;padding:6px;">位置データを読み込む</button>
     </div>
-    <p class="hint">PDF保存のしかた：印刷ダイアログの「送信先／プリンタ」で「PDFに保存」を選び保存します。<br>
-    ※ファイルを直接開いて表示できない場合は同梱の <b>start.command</b> をダブルクリックしてください。</p>
+    <p class="hint">「PDF作成（ダウンロード）」を押すと、画面の見た目そのままのPDFが保存されます。印刷はそのPDFを開いて行うと、どの端末でもズレません。<br>
+    ※うまく動かない時のみ「ブラウザ印刷（予備）」をお使いください。</p>
   </div>
 
   <!-- ============ 用紙ステージ ============ -->
@@ -268,6 +269,7 @@
 </div>
 
 <script src="vendor/pdf.min.js"></script>
+<script src="vendor/pdf-lib.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -805,6 +807,101 @@
     window.print();
     if(wasAdjust) document.body.classList.add("adjust");
   });
+
+  // ---- 本物のPDFを生成（画面どおりに1枚の画像へ焼き込み→pdf-libでPDF化）----
+  // window.print() / html2canvas はいずれも top:% の再解決時にオーバーレイが
+  // ズレるため使わない。画面で確定済みの実描画座標（getBoundingClientRect）を
+  // そのまま高解像度canvasへ描き込む。これにより画面=出力が常に一致する。
+  function drawWrapped(o, text, x, topY, maxW, fs, lineH, align){
+    const paras=String(text).split("\n");
+    let cy=topY+(lineH-fs)/2;   // HTMLのline-height相当の上アキを補正
+    for(const para of paras){
+      if(!maxW){ o.fillText(para, x, cy); cy+=lineH; continue; }
+      let line="";
+      for(const ch of para){
+        const test=line+ch;
+        if(o.measureText(test).width>maxW && line){ o.fillText(line, x, cy); cy+=lineH; line=ch; }
+        else { line=test; }
+      }
+      o.fillText(line, x, cy); cy+=lineH;
+    }
+  }
+  function flattenToCanvas(){
+    const src=canvas;                       // pdf.jsで描いた高解像度の雛形
+    const out=document.createElement("canvas");
+    out.width=src.width; out.height=src.height;
+    const o=out.getContext("2d");
+    o.drawImage(src,0,0);
+    const pr=page.getBoundingClientRect();
+    const sx=out.width/pr.width, sy=out.height/pr.height;
+    document.querySelectorAll("#page .overlay").forEach(el=>{
+      const cs=getComputedStyle(el);
+      if(cs.display==="none"||cs.visibility==="hidden") return;
+      const r=el.getBoundingClientRect();
+      const x=(r.left-pr.left)*sx, y=(r.top-pr.top)*sy;
+      if(el.classList.contains("marker")){
+        const w=r.width*sx, h=r.height*sy;
+        o.save();
+        o.strokeStyle=cs.borderTopColor||"#c0392b";
+        o.lineWidth=Math.max(1,(parseFloat(cs.borderTopWidth)||2)*sx);
+        o.beginPath(); o.ellipse(x+w/2,y+h/2,Math.max(1,w/2),Math.max(1,h/2),0,0,Math.PI*2); o.stroke();
+        o.restore();
+        return;
+      }
+      const contentEl=el.querySelector(".ovcontent")||el;
+      const txt=contentEl.textContent;
+      if(!txt) return;
+      const fs=(parseFloat(cs.fontSize)||13)*sx;
+      const lineH=fs*1.3;
+      o.save();
+      o.fillStyle=cs.color||"#16324a";
+      o.font=(cs.fontStyle||"normal")+" "+(cs.fontWeight||"400")+" "+fs+"px "+(cs.fontFamily||"sans-serif");
+      o.textBaseline="top";
+      if((cs.textAlign||"left")==="center"){
+        o.textAlign="center";
+        drawWrapped(o, txt, x+(r.width*sx)/2, y, 0, fs, lineH, "center");
+      } else {
+        o.textAlign="left";
+        const maxW=el.classList.contains("multi") ? r.width*sx : 0;
+        drawWrapped(o, txt, x, y, maxW, fs, lineH, "left");
+      }
+      o.restore();
+    });
+    return out;
+  }
+  async function generatePdf(){
+    if(pdfImg.style.display==="none"){ alert("先に雛形PDFを選択してください。"); return; }
+    if(!window.PDFLib){ alert("PDF生成ライブラリの読み込みに失敗しました。ページを再読み込みしてください。"); return; }
+    const btn=document.getElementById("pdfBtn");
+    const orig=btn.textContent; btn.disabled=true; btn.textContent="PDF作成中…";
+    const wasAdjust=document.body.classList.contains("adjust");
+    document.body.classList.remove("adjust");
+    try{
+      const cnv=flattenToCanvas();
+      const dataUrl=cnv.toDataURL("image/png");
+      const pngBytes=await (await fetch(dataUrl)).arrayBuffer();
+      const { PDFDocument }=PDFLib;
+      const doc=await PDFDocument.create();
+      const png=await doc.embedPng(pngBytes);
+      const pw=595.28, ph=pw*cnv.height/cnv.width;   // A4幅基準、画像比率で高さ算出
+      const pg=doc.addPage([pw, ph]);
+      pg.drawImage(png, { x:0, y:0, width:pw, height:ph });
+      const bytes=await doc.save();
+      const no=getRecordNo();
+      const fname="作業完了報告書"+(no?("_"+no):"")+".pdf";
+      const blob=new Blob([bytes], { type:"application/pdf" });
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url; a.download=fname; document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1500);
+    }catch(e){
+      alert("PDF作成に失敗しました："+(e&&e.message?e.message:e));
+    }finally{
+      if(wasAdjust) document.body.classList.add("adjust");
+      btn.disabled=false; btn.textContent=orig;
+    }
+  }
+  document.getElementById("pdfBtn").addEventListener("click", generatePdf);
 
   // ---- クラウド同期 UI ----
   const syncStatusEl=document.getElementById("syncStatus");

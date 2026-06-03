@@ -812,18 +812,22 @@
   // window.print() / html2canvas はいずれも top:% の再解決時にオーバーレイが
   // ズレるため使わない。画面で確定済みの実描画座標（getBoundingClientRect）を
   // そのまま高解像度canvasへ描き込む。これにより画面=出力が常に一致する。
-  function drawWrapped(o, text, x, topY, maxW, fs, lineH, align){
+  // 各行を「行ボックスの中央」に textBaseline=middle で描く。
+  // これによりフォントのアセンダ/ディセンダ差(端末・OS依存)に左右されず、
+  // ブラウザの行ボックス配置と一致する。topY は overlay の上端(canvas座標)。
+  function drawWrapped(o, text, x, topY, maxW, fs, lineH){
     const paras=String(text).split("\n");
-    let cy=topY+(lineH-fs)/2;   // HTMLのline-height相当の上アキを補正
+    let li=0;
+    const drawLine=(s)=>{ o.fillText(s, x, topY + lineH*li + lineH/2); li++; };
     for(const para of paras){
-      if(!maxW){ o.fillText(para, x, cy); cy+=lineH; continue; }
+      if(!maxW){ drawLine(para); continue; }
       let line="";
       for(const ch of para){
         const test=line+ch;
-        if(o.measureText(test).width>maxW && line){ o.fillText(line, x, cy); cy+=lineH; line=ch; }
+        if(o.measureText(test).width>maxW && line){ drawLine(line); line=ch; }
         else { line=test; }
       }
-      o.fillText(line, x, cy); cy+=lineH;
+      drawLine(line);
     }
   }
   function flattenToCanvas(){
@@ -851,19 +855,21 @@
       const contentEl=el.querySelector(".ovcontent")||el;
       const txt=contentEl.textContent;
       if(!txt) return;
-      const fs=(parseFloat(cs.fontSize)||13)*sx;
-      const lineH=fs*1.3;
+      const fsCss=parseFloat(cs.fontSize)||13;
+      const lhCss=parseFloat(cs.lineHeight)||fsCss*1.3; // "normal"等はNaN→1.3倍で代替
+      const fs=fsCss*sx;
+      const lineH=lhCss*sx;
       o.save();
       o.fillStyle=cs.color||"#16324a";
       o.font=(cs.fontStyle||"normal")+" "+(cs.fontWeight||"400")+" "+fs+"px "+(cs.fontFamily||"sans-serif");
-      o.textBaseline="top";
+      o.textBaseline="middle";
       if((cs.textAlign||"left")==="center"){
         o.textAlign="center";
-        drawWrapped(o, txt, x+(r.width*sx)/2, y, 0, fs, lineH, "center");
+        drawWrapped(o, txt, x+(r.width*sx)/2, y, 0, fs, lineH);
       } else {
         o.textAlign="left";
         const maxW=el.classList.contains("multi") ? r.width*sx : 0;
-        drawWrapped(o, txt, x, y, maxW, fs, lineH, "left");
+        drawWrapped(o, txt, x, y, maxW, fs, lineH);
       }
       o.restore();
     });
@@ -876,7 +882,15 @@
     const orig=btn.textContent; btn.disabled=true; btn.textContent="PDF作成中…";
     const wasAdjust=document.body.classList.contains("adjust");
     document.body.classList.remove("adjust");
+    // スマホの「入力」タブからは #stage が display:none で #page を計測できない
+    // (rectが0→座標がNaN→文字が描かれない/ズレる)。一時的にプレビューを出して計測する。
+    const hadPreview=document.body.classList.contains("showpreview");
+    if(page.getBoundingClientRect().width===0){ document.body.classList.add("showpreview"); }
+    const restorePreview=()=>{ if(!hadPreview) document.body.classList.remove("showpreview"); };
     try{
+      if(page.getBoundingClientRect().width===0){
+        throw new Error("プレビューを表示できませんでした。『プレビュー』タブを開いてからお試しください。");
+      }
       const cnv=flattenToCanvas();
       const dataUrl=cnv.toDataURL("image/png");
       const pngBytes=await (await fetch(dataUrl)).arrayBuffer();
@@ -897,6 +911,7 @@
     }catch(e){
       alert("PDF作成に失敗しました："+(e&&e.message?e.message:e));
     }finally{
+      restorePreview();
       if(wasAdjust) document.body.classList.add("adjust");
       btn.disabled=false; btn.textContent=orig;
     }

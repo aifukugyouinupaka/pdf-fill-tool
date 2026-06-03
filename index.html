@@ -836,18 +836,23 @@
     out.width=src.width; out.height=src.height;
     const o=out.getContext("2d");
     o.drawImage(src,0,0);
-    const pr=page.getBoundingClientRect();
-    const sx=out.width/pr.width, sy=out.height/pr.height;
+    // 基準は #page ではなく「実際に表示されている背景画像(pdfImg)」の矩形。
+    // #page は端末/レイアウトによって画像より高く計測されることがあり、
+    // 縦スケール(canvas/pr.height)が狂うと下の項目ほど上にズレる(実測0.85倍)。
+    // 画像はcanvasのPNGなので縦横比はcanvasと完全一致 → 横幅から求めた
+    // 単一の等方スケール s を縦横とも使えば縦スケール誤差は原理的に起きない。
+    const ir=pdfImg.getBoundingClientRect();
+    const s=out.width/ir.width;
     document.querySelectorAll("#page .overlay").forEach(el=>{
       const cs=getComputedStyle(el);
       if(cs.display==="none"||cs.visibility==="hidden") return;
       const r=el.getBoundingClientRect();
-      const x=(r.left-pr.left)*sx, y=(r.top-pr.top)*sy;
+      const x=(r.left-ir.left)*s, y=(r.top-ir.top)*s;
       if(el.classList.contains("marker")){
-        const w=r.width*sx, h=r.height*sy;
+        const w=r.width*s, h=r.height*s;
         o.save();
         o.strokeStyle=cs.borderTopColor||"#c0392b";
-        o.lineWidth=Math.max(1,(parseFloat(cs.borderTopWidth)||2)*sx);
+        o.lineWidth=Math.max(1,(parseFloat(cs.borderTopWidth)||2)*s);
         o.beginPath(); o.ellipse(x+w/2,y+h/2,Math.max(1,w/2),Math.max(1,h/2),0,0,Math.PI*2); o.stroke();
         o.restore();
         return;
@@ -857,18 +862,18 @@
       if(!txt) return;
       const fsCss=parseFloat(cs.fontSize)||13;
       const lhCss=parseFloat(cs.lineHeight)||fsCss*1.3; // "normal"等はNaN→1.3倍で代替
-      const fs=fsCss*sx;
-      const lineH=lhCss*sx;
+      const fs=fsCss*s;
+      const lineH=lhCss*s;
       o.save();
       o.fillStyle=cs.color||"#16324a";
       o.font=(cs.fontStyle||"normal")+" "+(cs.fontWeight||"400")+" "+fs+"px "+(cs.fontFamily||"sans-serif");
       o.textBaseline="middle";
       if((cs.textAlign||"left")==="center"){
         o.textAlign="center";
-        drawWrapped(o, txt, x+(r.width*sx)/2, y, 0, fs, lineH);
+        drawWrapped(o, txt, x+(r.width*s)/2, y, 0, fs, lineH);
       } else {
         o.textAlign="left";
-        const maxW=el.classList.contains("multi") ? r.width*sx : 0;
+        const maxW=el.classList.contains("multi") ? r.width*s : 0;
         drawWrapped(o, txt, x, y, maxW, fs, lineH);
       }
       o.restore();
@@ -885,10 +890,10 @@
     // スマホの「入力」タブからは #stage が display:none で #page を計測できない
     // (rectが0→座標がNaN→文字が描かれない/ズレる)。一時的にプレビューを出して計測する。
     const hadPreview=document.body.classList.contains("showpreview");
-    if(page.getBoundingClientRect().width===0){ document.body.classList.add("showpreview"); }
+    if(pdfImg.getBoundingClientRect().width===0){ document.body.classList.add("showpreview"); }
     const restorePreview=()=>{ if(!hadPreview) document.body.classList.remove("showpreview"); };
     try{
-      if(page.getBoundingClientRect().width===0){
+      if(pdfImg.getBoundingClientRect().width===0){
         throw new Error("プレビューを表示できませんでした。『プレビュー』タブを開いてからお試しください。");
       }
       const cnv=flattenToCanvas();

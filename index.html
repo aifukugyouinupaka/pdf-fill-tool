@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>作業完了報告書 記入ツール</title>
+<title>UME報告書ツール</title>
 <style>
   :root { --accent:#1769aa; }
   * { box-sizing: border-box; }
@@ -134,8 +134,7 @@
 
   <!-- ============ 操作パネル ============ -->
   <div id="panel" class="no-print">
-    <h1>作業完了報告書 記入ツール</h1>
-    <p class="sub">雛形PDFをアップロードし、各欄に入力して「印刷／PDF保存」を押してください。記入位置がずれる場合は「位置調整モード」で各欄をドラッグして合わせると、次回以降も自動再現されます。</p>
+    <h1>UME報告書ツール</h1>
 
     <div class="group">
       <label for="fileInput">雛形PDF（アップロードで自動保存）</label>
@@ -145,11 +144,11 @@
     </div>
 
     <div class="group">
-      <label>クラウド同期（複数端末で共有）</label>
+      <label>保存（複数端末で共有）</label>
       <div id="syncStatus" class="hint" style="margin-top:0;">確認中…</div>
       <div class="btnrow">
-        <button class="btn ghost" id="syncNowBtn" style="font-size:12px;padding:6px;">今すぐ同期</button>
-        <button class="btn ghost" id="passBtn" style="font-size:12px;padding:6px;">合言葉の設定</button>
+        <button class="btn ghost" id="syncNowBtn" style="font-size:12px;padding:6px;">保存</button>
+        <button class="btn ghost" id="passBtn" style="font-size:12px;padding:6px;">パスワード</button>
       </div>
     </div>
 
@@ -217,26 +216,28 @@
       <div class="selinfo" id="selinfo">調整モードON時：欄をドラッグ、または選択して矢印キーで微調整（Shiftで大きく移動）。日時(年月日時分)はどれをドラッグしても行ごとまとめて移動します。</div>
     </div>
 
-    <div class="group">
-      <label>日時の文字間隔（年〜分の幅）</label>
-      <input type="range" id="dtScale" min="0.6" max="1.6" step="0.02" value="1" style="width:100%">
-    </div>
-    <div class="group">
-      <label>日時の文字サイズ</label>
-      <input type="range" id="dtFont" min="8" max="16" step="0.5" value="13" style="width:100%">
-    </div>
-
     <button class="btn primary" id="pdfBtn">PDF作成（ダウンロード）</button>
-    <div class="btnrow">
-      <button class="btn ghost" id="printBtn" style="font-size:12px;padding:6px;">ブラウザ印刷（予備）</button>
-      <button class="btn ghost" id="resetPosBtn" style="font-size:12px;padding:6px;">位置を初期化</button>
+
+    <button class="btn ghost" id="advToggle" type="button" style="font-size:12px;padding:6px;margin-top:8px;">詳細設定を表示</button>
+    <div id="advPanel" style="display:none;margin-top:8px;">
+      <div class="group">
+        <label>日時の文字間隔（年〜分の幅）</label>
+        <input type="range" id="dtScale" min="0.6" max="1.6" step="0.02" value="1" style="width:100%">
+      </div>
+      <div class="group">
+        <label>日時の文字サイズ</label>
+        <input type="range" id="dtFont" min="8" max="16" step="0.5" value="13" style="width:100%">
+      </div>
+      <div class="btnrow">
+        <button class="btn ghost" id="printBtn" style="font-size:12px;padding:6px;">ブラウザ印刷（予備）</button>
+        <button class="btn ghost" id="resetPosBtn" style="font-size:12px;padding:6px;">位置を初期化</button>
+      </div>
+      <div class="btnrow">
+        <button class="btn ghost" id="exportPosBtn" style="font-size:12px;padding:6px;">位置データを書き出す</button>
+        <button class="btn ghost" id="importPosBtn" style="font-size:12px;padding:6px;">位置データを読み込む</button>
+      </div>
+      <p class="hint">「PDF作成（ダウンロード）」で画面どおりのPDFが保存されます。印刷はそのPDFを開いて行うとどの端末でもズレません。※うまく動かない時のみ「ブラウザ印刷（予備）」をお使いください。</p>
     </div>
-    <div class="btnrow">
-      <button class="btn ghost" id="exportPosBtn" style="font-size:12px;padding:6px;">位置データを書き出す</button>
-      <button class="btn ghost" id="importPosBtn" style="font-size:12px;padding:6px;">位置データを読み込む</button>
-    </div>
-    <p class="hint">「PDF作成（ダウンロード）」を押すと、画面の見た目そのままのPDFが保存されます。印刷はそのPDFを開いて行うと、どの端末でもズレません。<br>
-    ※うまく動かない時のみ「ブラウザ印刷（予備）」をお使いください。</p>
   </div>
 
   <!-- ============ 用紙ステージ ============ -->
@@ -572,7 +573,7 @@
 
   function getRecordNo(){ return recordNoEl.value.trim(); }
   function setRecordNo(no){ recordNoEl.value=no||""; updateTitle(); }
-  function updateTitle(){ const no=getRecordNo(); document.title = no ? no : "作業完了報告書 記入ツール"; }
+  function updateTitle(){ const no=getRecordNo(); document.title = no ? no : "UME報告書ツール"; }
   function setSaveStatus(t){ saveStatusEl.textContent=t||""; }
 
   function gv(id){ return document.getElementById(id).value; }
@@ -926,6 +927,17 @@
     }
   }
   document.getElementById("pdfBtn").addEventListener("click", generatePdf);
+
+  // ---- 詳細設定の開閉 ----
+  (function(){
+    const tg=document.getElementById("advToggle");
+    const ap=document.getElementById("advPanel");
+    tg.addEventListener("click", ()=>{
+      const open=ap.style.display==="none";
+      ap.style.display=open?"block":"none";
+      tg.textContent=open?"詳細設定を隠す":"詳細設定を表示";
+    });
+  })();
 
   // ---- クラウド同期 UI ----
   const syncStatusEl=document.getElementById("syncStatus");
